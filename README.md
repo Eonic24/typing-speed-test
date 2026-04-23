@@ -101,12 +101,8 @@ This means:
 * No CORS issues during development
 * Seamless API integration
 
----
 
-## 📁 Important Notes
 
-* Do **not** upload `node_modules` or `dist` folders
-* These will be automatically generated using `npm install` and `npm run build`
 
 ---
 
