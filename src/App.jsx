@@ -1,135 +1,219 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API = "http://localhost:8080/api";
 
+const fallbackWords = [
+  "as", "come", "got", "free", "could", "from", "few", "have", "there", "out",
+  "next", "or", "them", "its", "up", "at", "high", "together", "my", "on",
+  "she", "and", "real", "then", "some", "take", "time", "they", "her", "even",
+  "north", "get", "these", "of", "by", "good", "know", "great", "example",
+  "that", "children", "make", "would", "work", "in", "so", "back", "be",
+  "begin", "him", "group", "who", "like", "will", "to", "one", "no", "me",
+  "new", "he", "first", "than", "which", "just", "over", "can", "say", "ease",
+  "hold", "also", "how", "other", "our", "with", "it", "a", "go", "often",
+  "us", "look"
+];
+
+function buildText(seconds) {
+  const count = seconds === 15 ? 35 : seconds === 30 ? 80 : 150;
+  return Array.from(
+    { length: count },
+    (_, i) => fallbackWords[i % fallbackWords.length]
+  ).join(" ");
+}
+
 export default function App() {
-  const [paragraph, setParagraph] = useState(null);
+  const [duration, setDuration] = useState(30);
+  const [text, setText] = useState(buildText(30));
   const [typed, setTyped] = useState("");
+  const [timeLeft, setTimeLeft] = useState(30);
   const [started, setStarted] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(60);
   const [finished, setFinished] = useState(false);
-  const [stats, setStats] = useState({ wpm: 0, accuracy: 0, mistakes: 0 });
-  const [history, setHistory] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [stats, setStats] = useState({
+    wpm: 0,
+    accuracy: 100,
+    errors: 0,
+    correct: 0
+  });
+
+  const inputRef = useRef(null);
+  const textRef = useRef(text);
+  const typedRef = useRef("");
+  const timeLeftRef = useRef(duration);
+  const finishedRef = useRef(false);
 
   useEffect(() => {
-    loadParagraph();
-  }, []);
+    resetTest(duration);
+  }, [duration]);
+
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
+
+  useEffect(() => {
+    typedRef.current = typed;
+  }, [typed]);
+
+  useEffect(() => {
+    timeLeftRef.current = timeLeft;
+  }, [timeLeft]);
+
+  useEffect(() => {
+    finishedRef.current = finished;
+  }, [finished]);
 
   useEffect(() => {
     if (!started || finished) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) {
+        const next = prev - 1;
+
+        if (next <= 0) {
           clearInterval(timer);
-          finishTest();
+          finishTest(typedRef.current, 0);
           return 0;
         }
-        return prev - 1;
+
+        return next;
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [started, finished, typed]);
+  }, [started, finished]);
 
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Enter" && finished) {
+    const handleKey = (e) => {
+      if (e.key === "Tab") {
         e.preventDefault();
-        loadParagraph();
+        resetTest(duration);
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [finished]);
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [duration]);
 
-  async function loadParagraph() {
-    const res = await fetch(`${API}/paragraphs/random`);
-    const data = await res.json();
+  async function resetTest(selectedDuration = duration) {
+    let finalText = buildText(selectedDuration);
 
-    setParagraph(data);
+    try {
+      const res = await fetch(`${API}/paragraphs/random`);
+      const data = await res.json();
+      const repeatCount =
+        selectedDuration === 15 ? 4 : selectedDuration === 30 ? 8 : 15;
+
+      finalText = Array(repeatCount).fill(data.content).join(" ");
+    } catch {
+      finalText = buildText(selectedDuration);
+    }
+
+    setText(finalText);
+    textRef.current = finalText;
+
     setTyped("");
+    typedRef.current = "";
+
+    setTimeLeft(selectedDuration);
+    timeLeftRef.current = selectedDuration;
+
     setStarted(false);
-    setTimeLeft(60);
     setFinished(false);
-    setStats({ wpm: 0, accuracy: 0, mistakes: 0 });
-  }
+    finishedRef.current = false;
 
-  function calculateStats(value) {
-    if (!paragraph || value.length === 0) {
-      return { wpm: 0, accuracy: 0, mistakes: 0 };
-    }
-
-    let correct = 0;
-    let mistakes = 0;
-
-    for (let i = 0; i < value.length; i++) {
-      if (value[i] === paragraph.content[i]) correct++;
-      else mistakes++;
-    }
-
-    const elapsedSeconds = 60 - timeLeft || 1;
-    const minutes = elapsedSeconds / 60;
-    const wpm = Math.round((value.length / 5) / minutes);
-    const accuracy = Number(((correct / value.length) * 100).toFixed(2));
-
-    return { wpm, accuracy, mistakes };
-  }
-
-  function handleTyping(e) {
-    if (finished) return;
-
-    const value = e.target.value;
-    if (!started) setStarted(true);
-
-    setTyped(value);
-    setStats(calculateStats(value));
-
-    if (paragraph && value.length >= paragraph.content.length) {
-      finishTest(value);
-    }
-  }
-
-  async function finishTest(finalTyped = typed) {
-    if (finished || !paragraph) return;
-
-    const finalStats = calculateStats(finalTyped);
-    setStats(finalStats);
-    setFinished(true);
-
-    await fetch(`${API}/results`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        user: { id: 1 },
-        challenge: { id: paragraph.challenge.id },
-        paragraph: { id: paragraph.id },
-        wpm: finalStats.wpm,
-        accuracy: finalStats.accuracy,
-        mistakes: finalStats.mistakes,
-        timeTaken: 60 - timeLeft,
-        testDate: new Date().toISOString().slice(0, 19)
-      })
+    setStats({
+      wpm: 0,
+      accuracy: 100,
+      errors: 0,
+      correct: 0
     });
 
-    loadHistory(false);
+    setTimeout(() => inputRef.current?.focus(), 100);
   }
 
-  async function loadHistory(show = true) {
-    const res = await fetch(`${API}/results/user/1`);
-    const data = await res.json();
-    setHistory([...data].reverse());
-    setShowHistory(show);
+  function calculate(value, customTimeLeft = timeLeftRef.current) {
+    const currentText = textRef.current;
+
+    let correct = 0;
+    let errors = 0;
+
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === currentText[i]) {
+        correct++;
+      } else {
+        errors++;
+      }
+    }
+
+    const elapsed = Math.max(duration - customTimeLeft, 1);
+    const minutes = elapsed / 60;
+    const wpm = Math.round(correct / 5 / minutes);
+    const accuracy =
+      value.length === 0 ? 100 : Math.round((correct / value.length) * 100);
+
+    return {
+      wpm,
+      accuracy,
+      errors,
+      correct
+    };
   }
 
-  function renderHighlightedText() {
-    if (!paragraph) return "Loading paragraph...";
+  function handleInput(e) {
+    if (finishedRef.current) return;
 
-    return paragraph.content.split("").map((char, index) => {
+    const value = e.target.value;
+
+    typedRef.current = value;
+
+    if (!started) {
+      setStarted(true);
+    }
+
+    setTyped(value);
+    setStats(calculate(value));
+
+    if (value.length >= textRef.current.length) {
+      finishTest(value, timeLeftRef.current);
+    }
+  }
+
+  async function finishTest(
+    finalTyped = typedRef.current,
+    customTimeLeft = timeLeftRef.current
+  ) {
+    if (finishedRef.current) return;
+
+    const finalStats = calculate(finalTyped, customTimeLeft);
+
+    setStats(finalStats);
+    setFinished(true);
+    finishedRef.current = true;
+
+    try {
+      await fetch(`${API}/results`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          user: { id: 1 },
+          challenge: { id: 1 },
+          paragraph: { id: 1 },
+          wpm: finalStats.wpm,
+          accuracy: finalStats.accuracy,
+          mistakes: finalStats.errors,
+          timeTaken: duration - customTimeLeft,
+          testDate: new Date().toISOString().slice(0, 19)
+        })
+      });
+    } catch {
+      console.log("Result not saved. Backend may be offline.");
+    }
+  }
+
+  function renderText() {
+    return text.split("").map((char, index) => {
       let className = "char";
 
       if (index < typed.length) {
@@ -149,85 +233,140 @@ export default function App() {
   }
 
   return (
-    <main className="page">
-      <section className="card">
-        <div className="topbar">
-          <div>
-            <h1>TypeRush</h1>
-            <p className="subtitle">Typing Speed Test</p>
-          </div>
-          <button className="ghost" onClick={() => setShowHistory(!showHistory)}>
-            {showHistory ? "Hide History" : "History"}
+    <main className="page" onClick={() => inputRef.current?.focus()}>
+      <h1 className="logo">
+        type<span>rush</span>
+      </h1>
+
+      <div className="timeOptions">
+        {[15, 30, 60].map((sec) => (
+          <button
+            key={sec}
+            className={duration === sec ? "active" : ""}
+            onClick={() => setDuration(sec)}
+          >
+            {sec}s
           </button>
-        </div>
+        ))}
+      </div>
 
-        <div className="stats">
-          <div><span>{timeLeft}</span><p>seconds</p></div>
-          <div><span>{stats.wpm}</span><p>WPM</p></div>
-          <div><span>{stats.accuracy}%</span><p>accuracy</p></div>
-          <div><span>{stats.mistakes}</span><p>mistakes</p></div>
-        </div>
+      {!finished ? (
+        <>
+          <div className="line"></div>
 
-        <div className="paragraph">{renderHighlightedText()}</div>
-
-        <textarea
-          value={typed}
-          onChange={handleTyping}
-          disabled={finished || !paragraph}
-          placeholder="Start typing here..."
-          autoFocus
-        />
-
-        {finished && (
-          <div className="resultBox">
-            <h2>Test Complete</h2>
-            <div className="resultGrid">
-              <div><strong>{stats.wpm}</strong><p>WPM</p></div>
-              <div><strong>{stats.accuracy}%</strong><p>Accuracy</p></div>
-              <div><strong>{stats.mistakes}</strong><p>Mistakes</p></div>
+          <section className="stats">
+            <div>
+              <p>TIME</p>
+              <strong>
+                {timeLeft}
+                <small>s</small>
+              </strong>
             </div>
-            <p className="hint">Press Enter or click New Test to restart</p>
-          </div>
-        )}
 
-        <div className="buttons">
-          <button onClick={loadParagraph}>New Test</button>
-          <button className="ghost" onClick={() => loadHistory(true)}>
-            Load History
+            <div>
+              <p>WPM</p>
+              <strong>{stats.wpm}</strong>
+            </div>
+
+            <div>
+              <p>ACCURACY</p>
+              <strong>
+                {stats.accuracy}
+                <small>%</small>
+              </strong>
+            </div>
+
+            <div>
+              <p>ERRORS</p>
+              <strong>{stats.errors}</strong>
+            </div>
+          </section>
+
+          <p className="startHint">
+            {started ? "" : "Start typing to begin the test"}
+          </p>
+
+          <section className="textBox">{renderText()}</section>
+
+          <textarea
+            ref={inputRef}
+            value={typed}
+            onChange={handleInput}
+            autoFocus
+            spellCheck="false"
+          />
+
+          <p className="restartHint">
+            Press <kbd>Tab</kbd> to restart
+          </p>
+        </>
+      ) : (
+        <section className="resultScreen">
+          <p className="complete">TEST COMPLETE</p>
+
+          <div className="resultCards">
+            <div>
+              <p>WPM</p>
+              <strong>{stats.wpm}</strong>
+            </div>
+
+            <div>
+              <p>ACCURACY</p>
+              <strong className="green">
+                {stats.accuracy}
+                <small>%</small>
+              </strong>
+            </div>
+
+            <div>
+              <p>ERRORS</p>
+              <strong className="red">{stats.errors}</strong>
+            </div>
+
+            <div>
+              <p>DURATION</p>
+              <strong>
+                {duration}
+                <small>s</small>
+              </strong>
+            </div>
+          </div>
+
+          <div className="bars">
+            <div className="barLabel">
+              <span>Correct</span>
+              <span>{stats.correct}</span>
+            </div>
+
+            <div className="bar">
+              <div
+                className="barFill correctBar"
+                style={{
+                  width: `${Math.min(stats.accuracy, 100)}%`
+                }}
+              ></div>
+            </div>
+
+            <div className="barLabel">
+              <span>Errors</span>
+              <span>{stats.errors}</span>
+            </div>
+
+            <div className="bar">
+              <div
+                className="barFill errorBar"
+                style={{
+                  width: `${Math.min(stats.errors, 100)}%`
+                }}
+              ></div>
+            </div>
+          </div>
+
+          <button className="tryAgain" onClick={() => resetTest(duration)}>
+            Try again <span>(Tab)</span>
           </button>
-        </div>
-
-        {showHistory && (
-          <div className="history">
-            <h2>Typing History</h2>
-
-            {history.length === 0 ? (
-              <p>No history found.</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>WPM</th>
-                    <th>Accuracy</th>
-                    <th>Mistakes</th>
-                    <th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.wpm}</td>
-                      <td>{item.accuracy}%</td>
-                      <td>{item.mistakes}</td>
-                      <td>{item.timeTaken}s</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
     </main>
   );
 }

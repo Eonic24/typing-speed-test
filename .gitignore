@@ -15,4 +15,4 @@ backend/target/
 
 # IntelliJ
 .idea/
-*.iml
+*.imlnode_modules/
