@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Java / Spring Boot
+backend/target/
+
+# Logs
+*.log
+
+# Env files
+.env
+
+# IntelliJ
+.idea/
+*.iml
